@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 13px system-ui, sans-serif; width: 320px; margin: 0; padding: 12px; color: #0f172a; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .row { margin-bottom: 8px; }
+    label { display: block; font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; margin-bottom: 2px; }
+    input { width: 100%; box-sizing: border-box; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 5px; }
+    button { padding: 5px 10px; border-radius: 5px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; }
+    button.primary { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+    .status { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; background: #f1f5f9; margin-bottom: 10px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #94a3b8; }
+    .dot.connected { background: #10b981; } .dot.connecting { background: #f59e0b; }
+    .dot.rejected, .dot.unconfigured { background: #e11d48; }
+    .muted { color: #64748b; font-size: 12px; } .err { color: #be123c; font-size: 12px; }
+    .actions { display: flex; gap: 6px; }
+  </style>
+</head>
+<body>
+  <h1>ChatGPT bridge</h1>
+  <div class="status"><span id="dot" class="dot"></span><span id="status">…</span></div>
+  <div id="statusErr" class="err row"></div>
+  <div class="row muted" id="last">No job processed yet.</div>
+  <div class="row"><label>Hub URL</label><input id="hubUrl" placeholder="ws://127.0.0.1:8766/ws/ext" /></div>
+  <div class="row"><label>Shared secret (HUB_SHARED_SECRET)</label><input id="token" type="password" /></div>
+  <div class="actions"><button class="primary" id="save">Save</button><button id="reconnect">Reconnect</button></div>
+  <div class="row muted" style="margin-top:10px" id="chats"></div>
+  <div class="actions"><button id="delChats">Delete assistant chats from ChatGPT history</button></div>
+  <div class="row muted" id="delResult"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

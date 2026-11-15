@@ -1,0 +1,68 @@
+WORKANA ASSISTANT - QUICK START
+================================
+
+Contents
+  WorkanaAssistant\WorkanaAssistant.exe   hub + dashboard (http://localhost:8766)
+  WorkanaAssistant\my_fetcher.py          put your job-fetching code here (optional)
+  extensions\ext-chatgpt\                 ChatGPT extension  (load in Chrome profile 0)
+  extensions\ext-workana\                 Workana extension  (load in Chrome profiles 1-4)
+  extensions\*.zip                        same extensions, zipped (unzip before loading)
+  README.md                               full documentation
+
+1) START THE APP
+   Double-click WorkanaAssistant\WorkanaAssistant.exe.
+   - First start creates ".env" and "data\" next to the exe and prints HUB_SHARED_SECRET.
+   - The dashboard opens at http://localhost:8766. Closing the console window stops the app.
+   - Windows SmartScreen may warn about an unknown app: "More info" -> "Run anyway".
+   - Settings (port, fetcher, provider...) are in .env next to the exe. Restart after editing.
+
+2) LOAD THE EXTENSIONS (in each Chrome profile)
+   chrome://extensions -> turn on "Developer mode" -> "Load unpacked" -> choose the folder:
+     ChatGPT profile  : extensions\ext-chatgpt
+     Workana profiles : extensions\ext-workana
+   Keep these folders where they are: Chrome loads extensions from the folder.
+
+3) CONFIGURE EACH EXTENSION (click its icon)
+   - Shared secret: the HUB_SHARED_SECRET value from .env
+   - Hub URL: ws://127.0.0.1:8766/ws/ext  (already the default)
+   - Workana profiles only: Account ID = me / friend_a / friend_b / friend_c (as on the Accounts page)
+   - Keep Mode = fill_only until the Workana selectors are verified (README section 6).
+
+4) JOBS (Fetcher page)
+   The app fetches new Workana jobs itself (built-in fetcher, same method as the old Telegram bot).
+   Dashboard -> Fetcher:
+   - Start / Stop / Check now, health panel and a live log.
+   - Filters: languages, fixed / hourly, min budget, min hourly rate, skills, client member-since,
+     paid ratio, skip projects that no longer take bids. Click "Save & apply" - no restart needed.
+   - "Import from old bot": paste the old bot's .env to copy its filters, skills and Telegram settings.
+   - Telegram: optional alert for every new job (token + chat IDs, "Send test").
+   The first check only records the jobs already listed; after that each newly posted job that passes
+   the filters appears on the Jobs page (and is assigned to one account).
+
+5) PROMPTS (Prompts page)
+   One prompt per account (4 prompts) + the master prompt used by accounts without their own.
+   Click a {variable} to insert it, "Preview" shows the exact text ChatGPT will receive.
+   Keep {job.description} and {json_format} in every prompt. Each account's profile text is there too.
+
+6) OPTIONAL: YOUR OWN FETCHER CODE
+   Set FETCHER=mine in .env and write your code in WorkanaAssistant\my_fetcher.py (fill in _fetch_sync).
+   While my_fetcher.py is still the empty template, the built-in fetcher is used.
+   Your other app can also push jobs:  POST http://127.0.0.1:8766/api/jobs  (JSON list of jobs).
+
+7. Several accounts / batch
+   - Job panel: "Accounts bidding" -> tick accounts or "Select all" -> Generate.
+     Each account gets its own prompt; ChatGPT writes them one after another.
+     Each account has a tab with its drafts, Send button and status.
+   - Many jobs at once: tick jobs in the list -> pick accounts in the blue bar
+     -> optional "auto-send" + style -> "Generate N proposals".
+     With auto-send every proposal is queued as soon as it is written; the queue
+     spaces them out (delay per account, daily limit, jitter, quiet hours).
+   - A bid that is sending can be stopped with "Cancel sending".
+     If a bid reached Workana but shows failed, use "Mark as sent".
+
+8. Pacing, tabs, updates
+   - ChatGPT waits a random 15-45 s between prompts (Settings -> ChatGPT pause)
+     and uses temporary chats. The header shows what it is writing.
+   - The Workana tab closes ~5 s after a verified send.
+   - After updating: reload the dashboard tab and click reload on both extensions
+     in every profile. A chip marked "update" = that extension is still old.
