@@ -31,6 +31,9 @@ export default function JobDetail({ jobId, onClose }: { jobId: string; onClose: 
   const [rates, setRates] = useState<{ BRL: number; MXN: number } | undefined>(undefined);
   const [translate, setTranslate] = useState<"job" | "proposal" | "all" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmUrgent, setConfirmUrgent] = useState(false);
+  const [urgentJob, setUrgentJob] = useState<string | null>(null);
+  useEffect(() => { api.status().then((s) => setUrgentJob(s.urgent?.job_id ?? null)).catch(() => undefined); }, [jobId]);
   const draftSetKey = useRef("");
 
   const load = useCallback(async () => {
@@ -47,6 +50,7 @@ export default function JobDetail({ jobId, onClose }: { jobId: string; onClose: 
   }, [jobId]);
   useEffect(() => subscribe((type, data) => {
     if (JOB_EVENTS.has(type) && (data?.job_id ?? data?.id) === jobId) load();
+    if (type === "urgent") setUrgentJob(data?.job_id ?? null);
   }), [subscribe, jobId, load]);
   useEffect(() => {
     api.settings().then((r) => {
@@ -252,6 +256,16 @@ export default function JobDetail({ jobId, onClose }: { jobId: string; onClose: 
                 {job.generating_accounts?.length ? `Generating… (${job.generating_accounts.length})`
                   : `Generate for ${pending.length} account${pending.length === 1 ? "" : "s"}`} <kbd className="!bg-indigo-500 !text-white">G</kbd>
               </button>
+              {urgentJob === jobId ? (
+                <button className="btn-ghost border-orange-300 text-orange-700" disabled={busy}
+                  title="This job is going first; everything else is paused" onClick={() => run(async () => {
+                    await api.endUrgent(); setUrgentJob(null); toast("Urgent mode ended - the previous order continues", "ok");
+                  })}>⚡ Urgent… End</button>
+              ) : (
+                <button className="btn-ghost text-orange-700" disabled={busy || job.status === "skipped" || !targets.length}
+                  title="Pause everything else, generate + send this job's proposals now, then resume the previous order"
+                  onClick={() => setConfirmUrgent(true)}>⚡ Send urgently</button>
+              )}
               <button className="btn-ghost" disabled={busy} onClick={skip}>
                 {job.status === "skipped" ? "Un-skip" : "Skip"} <kbd>X</kbd>
               </button>
@@ -439,6 +453,31 @@ export default function JobDetail({ jobId, onClose }: { jobId: string; onClose: 
           <div className="text-xs text-slate-500">
             The command goes only to this account's browser profile. Limits, delay and jitter are applied before dispatch.
           </div>
+        </div>
+      </Modal>
+      <Modal open={confirmUrgent} onClose={() => setConfirmUrgent(false)} title="⚡ Send this job urgently?"
+        footer={<>
+          <button className="btn-ghost" onClick={() => setConfirmUrgent(false)}>Cancel</button>
+          <button className="btn-primary !bg-orange-600 hover:!bg-orange-700" disabled={busy} onClick={() => run(async () => {
+            const r = await api.makeUrgent(jobId);
+            setConfirmUrgent(false); setUrgentJob(jobId);
+            toast(`⚡ Urgent: ${r.queued_now.length} proposal(s) sending now${r.generating.length ? `, ${r.generating.length} being generated first` : ""}`
+              + (r.not_queued.length ? ` · not queued: ${r.not_queued.join(", ")}` : ""), "ok");
+          })}>⚡ Send urgently</button>
+        </>}>
+        <div className="space-y-2 text-sm">
+          <p><b>Everything else pauses</b> - other generations and other queued proposals wait.</p>
+          <p>This job's selected accounts ({targets.join(", ")}) go first:</p>
+          <ul className="list-disc space-y-0.5 pl-5 text-slate-600">
+            <li>accounts with drafts are queued <b>right away</b> (auto-send style and price rule; no review window);</li>
+            <li>accounts without drafts are <b>generated first</b>, with no pause between prompts, then sent;</li>
+            <li>no random gap and no minimum delay between bids for these; daily limits and paused / offline accounts still apply.</li>
+          </ul>
+          <p>When its proposals are sent, the <b>previous order continues automatically</b>. A prompt ChatGPT is already writing, or a
+            form already being filled, finishes first. Urgent mode ends by itself after 20 minutes at the latest.</p>
+          {accounts && targets.some((a) => accounts[a]?.paused) && (
+            <p className="rounded bg-amber-50 p-2 text-amber-800">Paused accounts are skipped: {targets.filter((a) => accounts[a]?.paused).join(", ")}</p>
+          )}
         </div>
       </Modal>
       <ConfirmDanger open={confirmDelete} title="Delete this job?" action="Delete job" busy={busy}

@@ -71,6 +71,11 @@ $("markFailed").addEventListener("click", () => {
 $("watchInbox").addEventListener("change", async () => {
   await chrome.storage.local.set({ watchInbox: $<HTMLInputElement>("watchInbox").checked });
 });
+$("closeTabs").addEventListener("click", async () => {
+  if (!confirm("Close the Workana tabs left open in this profile?\n\nKept: pinned tabs, the tab you are looking at, and any tab the assistant is using right now.")) return;
+  const r = await chrome.runtime.sendMessage({ kind: "close_assistant_tabs" });
+  $("checkResult").textContent = `Closed ${r?.closed ?? 0} tab(s).`;
+});
 $("checkNow").addEventListener("click", async () => {
   $("checkResult").textContent = "Checking…";
   const r = await chrome.runtime.sendMessage({ kind: "check_now" });

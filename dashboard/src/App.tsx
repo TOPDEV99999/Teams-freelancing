@@ -182,6 +182,18 @@ export default function App() {
             <button className="btn-primary ml-auto !py-1" onClick={() => location.reload()}>Reload</button>
           </div>
         )}
+        {st?.urgent && (
+          <div className="flex flex-wrap items-center gap-3 border-b border-orange-300 bg-orange-50 px-4 py-2 text-sm text-orange-900">
+            <span className="text-lg">⚡</span>
+            <span><b>Urgent:</b> “{st.urgent.title}” goes first. Other generations and sends are <b>paused</b> and continue
+              automatically when its proposals are sent (ends by itself in <Countdown until={st.urgent.ends_at} /> at the latest).</span>
+            <a className="btn-ghost !py-0.5" href={`#/jobs/${encodeURIComponent(st.urgent.job_id)}`}>Open job</a>
+            <button className="btn-ghost !py-0.5" onClick={async () => {
+              try { await api.endUrgent(); toast("Urgent mode ended - the previous order continues", "ok"); }
+              catch (e) { toast((e as Error).message); }
+            }}>End urgent mode</button>
+          </div>
+        )}
         {paused.length > 0 && (
           <div className="space-y-1 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
             {paused.map((a) => (

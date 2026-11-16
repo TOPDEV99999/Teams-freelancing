@@ -160,6 +160,8 @@ class CancelAll(BaseModel):
 @router.post("/control/cancel-all")
 async def cancel_all(body: Optional[CancelAll] = None, s: Session = Depends(get_session)):
     body = body or CancelAll()
+    from ..services.urgent import urgent
+    urgent.end("Cancel everything")
     res = {"generations": 0, "submissions": 0, "auto_send_off": 0}
     touched: set[str] = set()
     if body.auto_send:

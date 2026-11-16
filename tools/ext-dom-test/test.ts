@@ -175,6 +175,19 @@ async function main() {
   set(`<div class="container main"><section class="error-section"><section class="error-box"><div class="error-message"><h2 class="error-title">Access Denied</h2></div></section></section></div>`);
   check("Access Denied page recognised", errorPageTitle() === "Access Denied");
 
+  // 11. Messages without text (the client's voice note in the screenshot), never skipped.
+  set(`<section id="container"><ul><div>
+    <li class="bid-proposal self"><div class="message"><article><p class="content">Hola, propuesta.</p></article><time title="15 Noviembre, 2026 14:01"></time></div></li>
+    <li class="other"><div class="message"><div class="audio-player"><button class="play"></button><span>00:00:00</span></div><time title="15 Noviembre, 2026 15:10"><span>Hace 1 hora</span></time></div></li>
+    <li class="other"><div class="message"><div class="unknown-widget"></div><time title="15 Noviembre, 2026 15:11"></time></div></li>
+    <li class="other"><div class="message"><article><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="20" height="20"></article></div></li>
+  </div></ul></section><aside><section class="user-block"><a class="user-name"><span>Marta</span></a></section></aside>`);
+  const mt = readThread("x");
+  check("voice message kept as a message", mt.messages.length === 4 && mt.messages[1]?.text.startsWith("🎤 Voice message") && !mt.messages[1]?.mine, JSON.stringify(mt.messages));
+  check("text-less unknown message kept", (mt.messages[2]?.text ?? "").startsWith("💬 Message without text"), mt.messages[2]?.text);
+  check("image message", (mt.messages[3]?.text ?? "").startsWith("🖼 Image"), mt.messages[3]?.text);
+  check("media count reported (for a page capture)", mt.media === 3, String(mt.media));
+
   document.getElementById("out")!.textContent = JSON.stringify(results);
 }
 

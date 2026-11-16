@@ -1,6 +1,11 @@
 Workana Assistant - Linux update (2026-11-16)
 
 New in this version
+  - Fixed: Workana tabs piling up. Every tab the extension opens is closed reliably (sent bids after 5 s; failed ones after 15 s or 10 min, max 3 kept). Popup button "Close Workana tabs opened by the assistant".
+  - Inbox lists only projects where a client has written; others are checked quietly in the background.
+  - ⚡ Send urgently (job panel): pauses other generations/sends, generates + sends that job now, then resumes the previous order.
+  - Fixed: dozens of pinned Workana tabs (Workana now redirects /inbox to the latest conversation). Duplicates are closed automatically.
+  - Inbox: voice messages, images and other messages without text are shown (with "Open on Workana"); readable bubble headers.
   - Currency per account (US$, R$, MX$): Accounts page -> "Bid currency on Workana"; rates in Settings -> Currencies.
     Prices are decided in USD (budget, auto-send rules) and converted only for the Workana form.
   - Dashboard alerts show ONLY client messages (no own replies, no Workana system notifications).
@@ -14,7 +19,7 @@ New in this version
   - Fixed: bids failing with "form_not_found" when the account had unread messages
     (Workana's chat preview was mistaken for the proposal form).
   - Prompt variables {job.client}, {job.client_json}, {job.client_name}.
-  - Workana extension 1.3.2: reload it in EVERY Workana browser profile
+  - Workana extension 1.3.5: reload it in EVERY Workana browser profile
     (copy extensions/ext-workana over the folder the profile loads, then chrome://extensions -> reload).
     The ChatGPT extension is unchanged (1.2.0).
 

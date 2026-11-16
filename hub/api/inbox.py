@@ -20,8 +20,10 @@ def _err(e: inbox.InboxError) -> HTTPException:
 
 
 @router.get("/conversations")
-def conversations(account: Optional[str] = None, s: Session = Depends(get_session)):
-    return {"items": inbox.list_conversations(s, account)}
+def conversations(account: Optional[str] = None, all: bool = False, s: Session = Depends(get_session)):
+    """Default: only projects where a client has written (all=true lists every conversation)."""
+    return {"items": inbox.list_conversations(s, account, client_only=not all),
+            "hidden": 0 if all else inbox.hidden_count(s, account)}
 
 
 @router.get("/{account_id}/{slug}")

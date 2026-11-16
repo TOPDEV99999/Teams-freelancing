@@ -110,7 +110,7 @@ export interface Notice {
 }
 export interface InboxMessage { id: number; pos: number; author: string; mine: boolean; text: string; time: string; first_seen: string }
 export interface Conversation {
-  id: number; account_id: string; slug: string; name: string; title: string; snippet: string; unread: boolean;
+  id: number; account_id: string; slug: string; name: string; title: string; snippet: string; unread: boolean; has_client?: boolean;
   updated_at: string; synced_at: string | null; last_error: string; job_id: string | null; url: string; last: InboxMessage | null;
 }
 export interface ThreadView { conversation: Conversation; messages: InboxMessage[]; verified?: boolean; recognised?: number }
@@ -156,8 +156,10 @@ export interface Account {
 export interface ConnInfo { connected: boolean; version?: string; last_seen_at?: string }
 export interface ExtStatus { chatgpt: ConnInfo; workana: Record<string, ConnInfo> }
 
+export interface UrgentStatus { job_id: string; title: string; started_at: string; ends_at: string }
 export interface HubStatus {
   build: string;
+  urgent?: UrgentStatus | null;
   expected_ext_version: string;
   expected_chatgpt_version?: string;
   extensions: ExtStatus;
@@ -337,7 +339,7 @@ export const api = {
   noticesRead: (body: { ids?: number[]; all?: boolean; read?: boolean }) => req<{ updated: number }>("POST", "/api/notices/read", body),
   noticeTest: (account_id?: string) => req<{ created: number }>("POST", "/api/notices/test", { account_id: account_id ?? null }),
   conversations: (account?: string) =>
-    req<{ items: Conversation[] }>("GET", `/api/inbox/conversations${account ? `?account=${encodeURIComponent(account)}` : ""}`),
+    req<{ items: Conversation[]; hidden: number }>("GET", `/api/inbox/conversations${account ? `?account=${encodeURIComponent(account)}` : ""}`),
   thread: (account: string, slug: string) => req<ThreadView>("GET", `/api/inbox/${encodeURIComponent(account)}/${encodeURIComponent(slug)}`),
   threadRefresh: (account: string, slug: string) =>
     req<ThreadView>("POST", `/api/inbox/${encodeURIComponent(account)}/${encodeURIComponent(slug)}/refresh`),
@@ -346,6 +348,9 @@ export const api = {
   threadRead: (account: string, slug: string) =>
     req<{ ok: boolean }>("POST", `/api/inbox/${encodeURIComponent(account)}/${encodeURIComponent(slug)}/read`),
   inboxCheck: (account: string) => req<{ ok: boolean }>("POST", `/api/inbox/${encodeURIComponent(account)}/check`),
+  makeUrgent: (jobId: string) => req<{ queued_now: string[]; generating: string[]; not_queued: string[]; urgent: UrgentStatus }>(
+    "POST", `/api/jobs/${encodeURIComponent(jobId)}/urgent`),
+  endUrgent: () => req<{ ended: string | null }>("DELETE", "/api/urgent"),
   refreshRates: () => req<{ currency_rates: SettingsValues["currency_rates"] }>("POST", "/api/settings/currency-rates/refresh"),
   noticesClear: (onlyRead = false) => req<{ deleted: number }>("DELETE", `/api/notices?only_read=${onlyRead}`),
   maintStats: () => req<MaintStats>("GET", "/api/maintenance/stats"),

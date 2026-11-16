@@ -55,8 +55,13 @@ def get_logs(kind: Optional[str] = None, level: Optional[str] = None, limit: int
 
 
 # Extension version this hub expects (bump together with ext-*/src/config.ts VERSION).
-EXPECTED_EXT_VERSION = "1.3.2"  # Workana extension
+EXPECTED_EXT_VERSION = "1.3.5"  # Workana extension
 EXPECTED_CHATGPT_VERSION = "1.2.0"
+
+
+def _urgent_status():
+    from ..services.urgent import urgent
+    return urgent.status()
 
 
 def _build_id() -> str:
@@ -92,6 +97,7 @@ def status(s: Session = Depends(get_session)):
         "build": BUILD_ID,
         "expected_ext_version": EXPECTED_EXT_VERSION,
         "expected_chatgpt_version": EXPECTED_CHATGPT_VERSION,
+        "urgent": _urgent_status(),
         "extensions": manager.status(),
         "generation": generation.status(),
         "next_global_dispatch_at": iso(submissions.next_global_at),

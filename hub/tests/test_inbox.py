@@ -79,7 +79,9 @@ def test_sent_bids_appear_as_conversations(client, session):
     session.add(Job(id="bid-job", url="https://www.workana.com/job/bid-job", title="Tienda online"))
     session.add(Submission(job_id="bid-job", account_id="friend_b", final_text="x", price=100, days=3, status=SubStatus.SENT))
     session.commit()
-    convs = client.get("/api/inbox/conversations").json()["items"]
+    r = client.get("/api/inbox/conversations").json()
+    assert all(c["slug"] != "bid-job" for c in r["items"]) and r["hidden"] >= 1  # no client message yet -> hidden
+    convs = client.get("/api/inbox/conversations?all=true").json()["items"]
     c = next(c for c in convs if c["slug"] == "bid-job")
     assert c["account_id"] == "friend_b" and c["title"] == "Tienda online" and c["job_id"] == "bid-job"
 
@@ -154,3 +156,27 @@ def test_startup_drops_messages_not_read_with_workana_markup(client, session):
     hubdb._migrate()
     assert client.get("/api/inbox/friend_b/old-1").json()["messages"] == []
     assert client.get("/api/inbox/me/good-1").json()["messages"][0]["text"] == "Hola, me interesa"
+
+
+
+def test_only_conversations_with_client_messages_are_listed(client, session):
+    from hub.models import Conversation, Job, Message, Submission, SubStatus
+    from hub.services import inbox as svc
+    session.add(Job(id="j-own", url="https://www.workana.com/job/j-own", title="Own only"))
+    session.add(Submission(job_id="j-own", account_id="me", final_text="Hola Ana, puedo hacer su logo en 5 días con 3 propuestas.",
+                           price=100, days=3, status=SubStatus.SENT))
+    session.add(Conversation(account_id="me", slug="j-own", snippet="𝐇𝐨𝐥𝐚 Ana, puedo hacer su logo en 5 días con 3 pro..."))
+    session.add(Conversation(account_id="me", slug="j-client", snippet="Tengo una pregunta sobre el plazo"))
+    session.add(Conversation(account_id="me", slug="j-read", parsed_v=2))
+    session.add(Message(account_id="me", slug="j-read", key="a", mine=True, text="Mi propuesta"))
+    session.add(Message(account_id="me", slug="j-read", key="b", mine=False, text="¡Hola! ¿Podemos hablar?"))
+    session.add(Conversation(account_id="me", slug="j-mine-only", parsed_v=2))
+    session.add(Message(account_id="me", slug="j-mine-only", key="c", mine=True, text="Solo mi propuesta"))
+    session.commit()
+    r = client.get("/api/inbox/conversations?account=me").json()
+    assert [c["slug"] for c in r["items"]] == ["j-read"] and r["items"][0]["has_client"] and r["hidden"] == 3
+    # Background check: the conversation whose latest line is NOT your proposal is read first; your own proposal
+    # (even in a fancy font, cut off by Workana) is not a candidate.
+    c_own = session.exec(__import__("sqlmodel").select(Conversation).where(Conversation.slug == "j-own")).one()
+    assert svc.looks_like_own_proposal(session, c_own)
+    assert svc.sweep_candidate(session, "me") == "j-client"

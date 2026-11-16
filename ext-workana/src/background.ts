@@ -7,6 +7,50 @@
 import { HubClient, getLocal } from "../../ext-common/hubClient";
 import { bidFormUrlFor, CLOSE_TAB_AFTER_SUCCESS, HUB_URL_DEFAULT, THREAD, TIMINGS, VERSION, WATCH } from "./config";
 import type { ContentMsg, ErrorCode, Mode, Task } from "./types";
+import { keepInboxTab } from "./inboxTab";
+import { KEEP_FAILED_MS, QUICK_FAIL_CODES, QUICK_FAIL_MS, due, register, scheduleClose, type Owned } from "./ownedTabs";
+
+// ---------------------------------------------------------------- tabs this extension opened (closed reliably)
+async function ownTab(tabId: number | undefined, kind: "submit" | "inbox") {
+  if (tabId === undefined) return;
+  const { ownedTabs = {} } = await getLocal("ownedTabs");
+  await chrome.storage.local.set({ ownedTabs: register(ownedTabs as Owned, tabId, kind, Date.now()) });
+}
+async function closeTabLater(tabId: number | undefined, inMs: number, failed = false) {
+  if (tabId === undefined) return;
+  const { ownedTabs = {} } = await getLocal("ownedTabs");
+  await chrome.storage.local.set({ ownedTabs: scheduleClose(ownedTabs as Owned, tabId, inMs, Date.now(), failed) });
+  setTimeout(() => { void closeDueTabs(); }, inMs + 200); // fast path; the periodic check covers a suspended worker
+}
+let closing = false;
+async function closeDueTabs() {
+  if (closing) return;
+  closing = true;
+  try {
+    const { ownedTabs = {}, task, inboxJob } = await getLocal(["ownedTabs", "task", "inboxJob"]);
+    if (!Object.keys(ownedTabs).length) return;
+    const open = new Set((await chrome.tabs.query({})).map((t) => t.id!).filter((x) => x !== undefined));
+    const protectedIds = new Set<number>([task?.tabId, inboxJob?.tabId].filter((x): x is number => typeof x === "number"));
+    const r = due(ownedTabs as Owned, Date.now(), open, protectedIds);
+    if (r.close.length) await chrome.tabs.remove(r.close).catch(() => undefined);
+    await chrome.storage.local.set({ ownedTabs: r.owned });
+  } finally {
+    closing = false;
+  }
+}
+
+/** Popup button: close the Workana tabs left open (unpinned, not the one you are looking at, not in use). */
+async function closeAssistantTabs(): Promise<number> {
+  const { task, inboxJob } = await getLocal(["task", "inboxJob"]);
+  const keep = new Set<number>([task?.tabId, inboxJob?.tabId].filter((x): x is number => typeof x === "number"));
+  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (active?.id !== undefined) keep.add(active.id);
+  const tabs = await chrome.tabs.query({ url: "https://www.workana.com/*", pinned: false });
+  const ids = tabs.map((t) => t.id!).filter((id) => id !== undefined && !keep.has(id));
+  if (ids.length) await chrome.tabs.remove(ids).catch(() => undefined);
+  await chrome.storage.local.set({ ownedTabs: {} });
+  return ids.length;
+}
 
 const MAX_PROCESSED = 500;
 
@@ -24,7 +68,7 @@ const client = new HubClient({
     else if (msg.type === "inbox_read" || msg.type === "inbox_send") void queueInboxJob(msg);
     else if (msg.type === "inbox_refresh") void refreshInbox(true);
   },
-  onTick: () => { void checkDeadline(); void flushNotices(); void checkInboxJob(); },
+  onTick: () => { void checkDeadline(); void flushNotices(); void checkInboxJob(); void closeDueTabs(); },
 });
 client.start();
 
@@ -111,22 +155,26 @@ async function onBell(items: { key: string; title: string; body: string }[]) {
 }
 
 /** Keep one pinned Workana inbox tab in the background and refresh it now and then (popup option). */
+let inboxTabBusy = false; // one check at a time - two parallel checks must never both open a tab
 async function refreshInbox(force = false) {
-  const { watchInbox = true, task } = await getLocal(["watchInbox", "task"]);
-  if (!watchInbox) return;
-  const tabs = await chrome.tabs.query({ url: "https://www.workana.com/inbox*" });
-  const tab = tabs.find((t) => !/\/inbox\/./.test(t.url ?? "")) ?? null;
-  if (!tab) {
-    if (task) return; // don't open tabs while a proposal is being filled
-    await chrome.tabs.create({ url: WATCH.inboxUrl, active: false, pinned: true });
-    return;
-  }
-  if (tab.active && !force) return; // you are looking at it
-  const { inboxRefreshedAt = 0 } = await getLocal("inboxRefreshedAt");
-  const due = WATCH.refreshMs * (0.75 + Math.random() * 0.5);
-  if (force || Date.now() - inboxRefreshedAt > due) {
-    await chrome.storage.local.set({ inboxRefreshedAt: Date.now() });
-    if (tab.id !== undefined) await chrome.tabs.reload(tab.id).catch(() => undefined);
+  if (inboxTabBusy) return;
+  inboxTabBusy = true;
+  try {
+    const { watchInbox = true, task, inboxTabId = null, inboxJob, inboxRefreshedAt = 0 } =
+      await getLocal(["watchInbox", "task", "inboxTabId", "inboxJob", "inboxRefreshedAt"]);
+    const r = await keepInboxTab({
+      query: (q) => chrome.tabs.query(q),
+      create: (p) => chrome.tabs.create(p),
+      remove: (ids) => chrome.tabs.remove(ids),
+      reload: (id) => chrome.tabs.reload(id),
+    }, {
+      watchInbox, taskRunning: !!task, inboxTabId, jobTabId: inboxJob?.tabId ?? null, refreshedAt: inboxRefreshedAt,
+      force, now: Date.now(), dueMs: WATCH.refreshMs * (0.75 + Math.random() * 0.5), inboxUrl: WATCH.inboxUrl,
+    });
+    await chrome.storage.local.set({ inboxTabId: r.inboxTabId, inboxRefreshedAt: r.refreshedAt });
+    if (r.closed) client.log(`closed ${r.closed} duplicate pinned Workana inbox tab(s)`, "warn");
+  } finally {
+    inboxTabBusy = false;
   }
 }
 // ---------------------------------------------------------------- dashboard inbox (read a conversation / send a reply)
@@ -153,6 +201,7 @@ async function nextInboxJob() {
   const { ownSlug } = await getLocal("ownSlug");
   const url = `https://www.workana.com/inbox/${job.slug}${ownSlug ? `/${ownSlug}` : ""}`;
   const tab = await chrome.tabs.create({ url, active: false });
+  await ownTab(tab.id, "inbox");
   await chrome.storage.local.set({ inboxQueue: rest, inboxJob: { ...job, tabId: tab.id, deadline: Date.now() + THREAD.jobTimeoutMs } });
 }
 
@@ -161,10 +210,7 @@ async function finishInboxJob(result: Record<string, unknown>) {
   if (!inboxJob) return;
   client.send({ type: "inbox_result", id: inboxJob.id, op: inboxJob.op, slug: inboxJob.slug, ...result });
   await chrome.storage.local.set({ inboxJob: null });
-  if (inboxJob.tabId !== undefined) {
-    const tabId = inboxJob.tabId;
-    setTimeout(() => { chrome.tabs.remove(tabId).catch(() => undefined); }, result.ok ? 1500 : 8000);
-  }
+  await closeTabLater(inboxJob.tabId, result.ok ? 1500 : 8000);
   setTimeout(() => { void nextInboxJob(); }, 2000 + Math.random() * 2000);
 }
 
@@ -196,7 +242,8 @@ async function forwardSnapshot(msg: any) {
 }
 
 chrome.alarms.create("inbox-watch", { periodInMinutes: 1 });
-chrome.alarms.onAlarm.addListener((a) => { if (a.name === "inbox-watch") void refreshInbox(); });
+void refreshInbox(); // also closes duplicate tabs left by version 1.3.3 and older right away
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === "inbox-watch") { void refreshInbox(); void closeDueTabs(); } });
 
 // ---------------------------------------------------------------- storage helpers
 async function getTask(): Promise<Task | null> {
@@ -251,6 +298,7 @@ async function handleSubmit(msg: { submission_id: number; attempt?: string; job_
   await chrome.storage.local.set({ ownTexts: [...ownTexts, normText(msg.text)].slice(-50) });
   // Straight to the proposal form (/messages/bid/<slug>); the job page is only used as a fallback.
   const tab = await chrome.tabs.create({ url: bidFormUrlFor(msg.job_id, msg.url) ?? msg.url, active: true });
+  await ownTab(tab.id, "submit");
   const task: Task = {
     submission_id: sid, job_id: msg.job_id, url: msg.url, text: msg.text, price: msg.price, days: msg.days,
     tabId: tab.id!, stage: "opening", mode, startedAt: Date.now(),
@@ -281,11 +329,10 @@ async function report(sid: number, status: "sent" | "failed", error?: ErrorCode,
   const task = await getTask();
   if (task?.submission_id === sid) {
     await setTask(null);
-    // Verified sends: close the job tab after a moment (failed / cancelled tabs stay open for you to look at).
-    if (status === "sent" && CLOSE_TAB_AFTER_SUCCESS) {
-      const tabId = task.tabId;
-      setTimeout(() => { chrome.tabs.remove(tabId).catch(() => undefined); }, TIMINGS.closeTabDelayMs);
-    }
+    // Verified sends close after a moment. Failed ones stay a while for you to look at (job closed / already
+    // bid: nothing to see, closed soon); at most a few are kept, the oldest closes first.
+    if (status === "sent" && CLOSE_TAB_AFTER_SUCCESS) await closeTabLater(task.tabId, TIMINGS.closeTabDelayMs);
+    else if (status === "failed") await closeTabLater(task.tabId, error && QUICK_FAIL_CODES.has(error) ? QUICK_FAIL_MS : KEEP_FAILED_MS, true);
   }
 }
 
@@ -367,6 +414,9 @@ chrome.runtime.onMessage.addListener((msg: ContentMsg | { kind: string; [k: stri
       case "bell":
         await onBell((msg as any).items ?? []);
         sendResponse({ ok: true });
+        return;
+      case "close_assistant_tabs":
+        sendResponse({ ok: true, closed: await closeAssistantTabs() });
         return;
       case "check_now": {
         await refreshInbox(true);

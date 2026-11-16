@@ -261,8 +261,22 @@ class GenerationService:
         self.queue = asyncio.Queue()
         self.queued.clear()
         self.current = None
+        from .urgent import urgent
+
         while True:
             item = await self.queue.get()
+            # Urgent mode: the urgent job's accounts go first; other jobs wait until urgent mode ends.
+            if urgent.job_id:
+                pick = next((x for x in self.queued if x[0] == urgent.job_id), None)
+                if pick is None:
+                    if item in self.queued:
+                        self.queue.put_nowait(item)  # keeps its turn
+                        await asyncio.sleep(1)
+                    continue
+                if pick != item:
+                    if item in self.queued:
+                        self.queue.put_nowait(item)
+                    item = pick
             if item not in self.queued:  # cancelled while waiting
                 continue
             self.queued.remove(item)
@@ -277,8 +291,8 @@ class GenerationService:
                 self.current = None
                 self.cancelled.discard(item)
                 self._settle(job_id)
-            if self.queued:
-                await self._pause_between()
+            if self.queued and not (urgent.job_id and any(j == urgent.job_id for j, _ in self.queued)):
+                await self._pause_between()  # no pause before the next account of an urgent job
 
     def _provider(self, name: str):
         return self.openai if name == "openai_api" else self.chatgpt
@@ -390,12 +404,14 @@ class GenerationService:
             if not drafts:
                 return
             acc = s.get(Account, account_id)
-            why = auto_send_guard(s, job, rules)
+            from .urgent import urgent
+            is_urgent = urgent.active_for(job_id)
+            why = None if is_urgent else auto_send_guard(s, job, rules)  # urgent: you decided
             draft = pick_auto_draft(s, job, account_id, drafts, rules, self.rng)
             # Decided in USD (budget clamp, min/max), converted to the account's currency only for Workana.
             price = auto_price(job, draft, acc, rules)
             max_price = float(rules.get("max_price") or 0)
-            if not why and max_price and price > max_price:
+            if not why and not is_urgent and max_price and price > max_price:
                 why = f"price US${price:g} is above the auto-send maximum US${max_price:g}"
             from . import currency
             cur = currency.norm(acc.currency if acc else "USD")
@@ -410,7 +426,7 @@ class GenerationService:
                 events.notify("job_updated", job_dict(job, s))
                 return
             days = draft.suggested_days or 7
-            hold = int(rules.get("review_seconds") or 0)
+            hold = 0 if is_urgent else int(rules.get("review_seconds") or 0)
             try:
                 sub = create_submission(
                     s, job_id=job_id, account_id=account_id, draft_id=draft.id, final_text=draft.text,

@@ -46,9 +46,15 @@ def _clean(v: Any, n: int) -> str:
     return re.sub(r"[ \t]+", " ", str(v or "")).strip()[:n]
 
 
+def has_client_message(s: Session, c: Conversation) -> bool:
+    return s.exec(select(Message.id).where(Message.account_id == c.account_id, Message.slug == c.slug,
+                                           Message.mine == False)).first() is not None  # noqa: E712
+
+
 def conv_dict(c: Conversation, s: Optional[Session] = None, last: Optional[Message] = None) -> dict[str, Any]:
     job = s.get(Job, c.slug) if s is not None else None
     return {
+        "has_client": has_client_message(s, c) if s is not None else False,
         "id": c.id, "account_id": c.account_id, "slug": c.slug, "name": c.name, "title": c.title or (job.title if job else ""),
         "snippet": c.snippet, "unread": c.unread, "updated_at": iso(c.updated_at), "synced_at": iso(c.synced_at),
         "last_error": c.last_error, "job_id": job.id if job else None,
@@ -89,11 +95,16 @@ def ensure_from_bids(s: Session, days: int = 60) -> None:
         s.commit()
 
 
-def list_conversations(s: Session, account: Optional[str] = None) -> list[dict[str, Any]]:
+def list_conversations(s: Session, account: Optional[str] = None, client_only: bool = True) -> list[dict[str, Any]]:
+    """Conversations for the dashboard. client_only (default): only projects where a CLIENT has written."""
     ensure_from_bids(s)
     stmt = select(Conversation)
     if account:
         stmt = stmt.where(Conversation.account_id == account)
+    if client_only:
+        stmt = stmt.where(select(Message.id).where(Message.account_id == Conversation.account_id,
+                                                   Message.slug == Conversation.slug,
+                                                   Message.mine == False).exists())  # noqa: E712
     rows = s.exec(stmt.order_by(Conversation.updated_at.desc()).limit(500)).all()
     out = []
     for c in rows:
@@ -101,6 +112,65 @@ def list_conversations(s: Session, account: Optional[str] = None) -> list[dict[s
                       .order_by(Message.pos.desc())).first()
         out.append(conv_dict(c, s, last))
     return out
+
+
+def hidden_count(s: Session, account: Optional[str] = None) -> int:
+    """Conversations not shown because no client message has been seen in them (yet)."""
+    total = len(s.exec(select(Conversation.id).where(*( [Conversation.account_id == account] if account else []))).all())
+    return max(0, total - len(list_conversations(s, account, client_only=True)))
+
+
+_norm_re = re.compile(r"[^a-z0-9]+")
+
+
+def _norm(t: str) -> str:
+    import unicodedata
+
+    return _norm_re.sub(" ", unicodedata.normalize("NFKC", t or "").lower()).strip()
+
+
+def looks_like_own_proposal(s: Session, c: Conversation) -> bool:
+    """Workana's latest line in the list is just the proposal you sent (nobody else has written)."""
+    snip = _norm(c.snippet.rstrip(".… "))[:60]
+    if not snip:
+        return True
+    sub = s.exec(select(Submission).where(Submission.job_id == c.slug, Submission.account_id == c.account_id)).first()
+    if sub is None:
+        return False
+    own = _norm(sub.final_text)
+    return own.startswith(snip[:40]) or snip.startswith(own[:40])
+
+
+def sweep_candidate(s: Session, account_id: str) -> Optional[str]:
+    """A not-yet-read conversation that probably has a client message (its latest line isn't your proposal)."""
+    rows = s.exec(select(Conversation).where(Conversation.account_id == account_id, Conversation.synced_at == None)  # noqa: E711
+                  .order_by(Conversation.updated_at.desc()).limit(300)).all()
+    for c in rows:
+        if _last_auto.get((account_id, c.slug), datetime.min) > utcnow() - timedelta(hours=6):
+            continue  # tried recently
+        if c.unread or not looks_like_own_proposal(s, c):
+            return c.slug
+    return None
+
+
+SWEEP_SECONDS = 90
+
+
+async def sweep_loop() -> None:
+    """Gently finds conversations where a client wrote: one conversation per account every ~90 s."""
+    import random
+
+    while True:
+        await asyncio.sleep(SWEEP_SECONDS * random.uniform(0.8, 1.2))
+        try:
+            for account_id in list(manager.workana.keys()):
+                with Session(engine) as s:
+                    slug = sweep_candidate(s, account_id)
+                if slug:
+                    _last_auto[(account_id, slug)] = utcnow()
+                    asyncio.get_running_loop().create_task(_safe_request(account_id, "read", slug))
+        except Exception as e:  # noqa: BLE001 - never stop the loop
+            events.log("inbox", f"inbox sweep error: {e!r}", "warn")
 
 
 def thread(s: Session, account_id: str, slug: str) -> dict[str, Any]:

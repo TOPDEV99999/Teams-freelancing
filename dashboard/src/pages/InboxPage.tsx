@@ -57,16 +57,19 @@ export default function InboxPage() {
 function Conversations({ account, openKey, setOpenKey }: { account: string; openKey: string | null; setOpenKey: (k: string | null) => void }) {
   const { accounts, subscribe, toast, ext } = useStore();
   const [items, setItems] = useState<Conversation[]>([]);
+  const [hidden, setHidden] = useState(0);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const name = (id: string) => accounts[id]?.display_name || id;
 
   const load = useCallback(() => {
-    api.conversations().then((r) => setItems(r.items)).catch((e) => toast((e as Error).message)).finally(() => setLoading(false));
+    api.conversations().then((r) => { setItems(r.items); setHidden(r.hidden ?? 0); })
+      .catch((e) => toast((e as Error).message)).finally(() => setLoading(false));
   }, [toast]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => subscribe((type, data) => {
     if (type === "inbox_conversation") {
+      if (!data?.has_client) return; // only projects where a client has written
       setItems((list) => {
         const rest = list.filter((c) => convKey(c) !== convKey(data));
         const old = list.find((c) => convKey(c) === convKey(data));
@@ -101,7 +104,7 @@ function Conversations({ account, openKey, setOpenKey }: { account: string; open
         <ul className="min-h-0 flex-1 divide-y divide-slate-100 overflow-auto">
           {!loading && list.length === 0 && (
             <li className="p-6 text-center text-sm text-slate-500">
-              No conversations yet. Every bid you send starts one; client messages appear here once the Workana extension reads them.
+              No client messages yet. Projects appear here as soon as a client writes to one of your accounts.
             </li>
           )}
           {list.map((c) => {
@@ -129,6 +132,12 @@ function Conversations({ account, openKey, setOpenKey }: { account: string; open
             );
           })}
         </ul>
+        {hidden > 0 && (
+          <div className="border-t border-slate-200 px-3 py-2 text-[11px] text-slate-400"
+            title="Conversations where only your proposal is there so far. They are checked in the background and appear here when a client writes.">
+            {hidden} conversation{hidden === 1 ? "" : "s"} without a client message hidden
+          </div>
+        )}
       </div>
       {open ? <ThreadPane key={openKey!} conv={open} /> : (
         <div className="flex flex-1 items-center justify-center p-10 text-center text-sm text-slate-500">
@@ -235,10 +244,14 @@ function ThreadPane({ conv }: { conv: Conversation }) {
           {msgs.map((m) => (
             <div key={m.id} className={`flex ${m.mine ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[75%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${m.mine ? "rounded-br-sm bg-indigo-600 text-white" : "rounded-bl-sm bg-surface text-slate-800"}`}>
-                <div className={`mb-0.5 text-[11px] ${m.mine ? "text-indigo-200" : "text-slate-400"}`}>
+                <div className={`mb-0.5 text-[11px] font-medium ${m.mine ? "text-white/85" : "text-slate-500"}`}>
                   {m.mine ? "You" : m.author || c.name || "Client"}{m.time ? ` · ${m.time}` : ""}
                 </div>
                 <div className="whitespace-pre-wrap break-words">{m.text}</div>
+                {/^(?:🎤|🖼|🎬|💬 Message without text)/u.test(m.text) && (
+                  <a href={c.url} target="_blank" rel="noopener"
+                    className={`mt-1 inline-block text-xs font-medium underline ${m.mine ? "text-white" : "text-indigo-600"}`}>Open on Workana ↗</a>
+                )}
               </div>
             </div>
           ))}

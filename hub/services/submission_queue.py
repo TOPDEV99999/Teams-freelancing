@@ -182,6 +182,11 @@ class SubmissionQueue:
         elif s.exec(select(Submission).where(Submission.account_id == sub.account_id,
                                              Submission.status == SubStatus.SENDING)).first():
             blocked = "account busy with another submission"
+        from .urgent import urgent
+        if urgent.job_id and sub.job_id != urgent.job_id:
+            blocked = f"paused - urgent job first ({urgent.title[:40]})"
+        elif urgent.active_for(sub.job_id) and blocked is None:
+            return {"not_before": iso(now), "blocked": None, "review_until": None, "urgent": True}
         candidates = [now]
         if sub.hold_until and sub.hold_until > now:
             candidates.append(sub.hold_until)
@@ -197,16 +202,21 @@ class SubmissionQueue:
         return submission_dict(sub, self.queue_info(s, sub))
 
     async def tick(self, now: Optional[datetime] = None) -> None:
+        from .urgent import urgent
+
         now = now or utcnow()
         with Session(engine) as s:
             self._check_timeouts(s, now)
-            if settings_store.in_quiet_hours(settings_store.get(s, "quiet_hours")):
+            urgent.check_done(s, self.manager, now)
+            u = urgent.job_id
+            if not u and settings_store.in_quiet_hours(settings_store.get(s, "quiet_hours")):
                 return
-            if self.next_global_at and now < self.next_global_at:
+            if not u and self.next_global_at and now < self.next_global_at:
                 return
-            queued = s.exec(
-                select(Submission).where(Submission.status == SubStatus.QUEUED).order_by(Submission.requested_at)
-            ).all()
+            q = select(Submission).where(Submission.status == SubStatus.QUEUED)
+            if u:  # urgent mode: only the urgent job's proposals; everything else waits
+                q = q.where(Submission.job_id == u)
+            queued = s.exec(q.order_by(Submission.requested_at)).all()
             if not queued:
                 return
             busy = set(s.exec(select(Submission.account_id).where(Submission.status == SubStatus.SENDING)).all())
@@ -214,13 +224,13 @@ class SubmissionQueue:
                 acc = s.get(Account, sub.account_id)
                 if acc is None or not acc.active or acc.paused or acc.id in busy:
                     continue
-                if sub.hold_until and now < sub.hold_until:  # review window (auto-send)
+                if not u and sub.hold_until and now < sub.hold_until:  # review window (auto-send)
                     continue
                 conn = self.manager.get_workana(acc.id)
                 if conn is None:
                     continue
                 last = last_dispatch(s, acc.id)
-                if last and now < last + timedelta(seconds=acc.min_delay_seconds):
+                if not u and last and now < last + timedelta(seconds=acc.min_delay_seconds):
                     continue
                 job = s.get(Job, sub.job_id)
                 sub.status = SubStatus.SENDING

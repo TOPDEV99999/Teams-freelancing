@@ -10,7 +10,23 @@ import { THREAD } from "./config";
 import { all, inOverlay, onPage, pick, textBoxes } from "./page";
 
 export interface ThreadMessage { author: string; mine: boolean; text: string; time: string }
-export interface Thread { slug: string; title: string; name: string; messages: ThreadMessage[]; can_reply: boolean; method: string }
+export interface Thread { slug: string; title: string; name: string; messages: ThreadMessage[]; can_reply: boolean; method: string; media?: number }
+
+export const MEDIA_PREFIX = /^(?:🎤|🖼|🎬|💬 Message without text)/u;
+
+/** A message without text: voice message, image, video... (Workana shows a player / preview instead of text). */
+function describeMedia(li: HTMLElement): string {
+  const body = li.querySelector<HTMLElement>(".message") ?? li;
+  const txt = body.innerText || body.textContent || "";
+  if (body.querySelector("audio, [class*='audio' i], [class*='voice' i], [class*='waveform' i], [class*='recording' i]")
+    || (/\b\d{1,2}:\d{2}(?::\d{2})?\b/.test(txt) && body.querySelector("button, [class*='play' i], svg, input[type='range'], progress"))) {
+    return "🎤 Voice message - listen on Workana";
+  }
+  if (body.querySelector("video, [class*='video-message' i]")) return "🎬 Video - open on Workana";
+  const img = Array.from(body.querySelectorAll<HTMLImageElement>("img")).find((i) => !i.closest(".profile-photo, .emoji, [class*='avatar' i]"));
+  if (img) return "🖼 Image - open on Workana";
+  return "💬 Message without text - open on Workana";
+}
 
 const TIME_RE = /^(?:\d{1,2}[:h]\d{2}(?:\s?[ap]\.?m\.?)?|ayer|hoy|ontem|hoje|yesterday|today|hace .+|há .+|\d+\s?(?:min|h|d|s)\b.*|\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?(?:,? \d{1,2}:\d{2})?|\d{1,2} (?:de )?[a-zç]{3,10}\.?(?: (?:de )?\d{4})?(?:,? \d{1,2}:\d{2})?)$/i;
 const MINE_RE = /\b(?:own|mine|self|me|sent|outgoing|outbound|right|is-?author|from-?me|my-?message)\b/i;
@@ -132,7 +148,7 @@ function readWorkana(): { messages: ThreadMessage[]; name: string } | null {
       text = `📝 Proposal${amount ? ` · ${cur} ${amount}` : ""}\n${content}`.trim();
     }
     if (files.length) text = `${text}${text ? "\n" : ""}📎 ${files.join(", ")}`;
-    if (!text) continue;
+    if (!text) text = describeMedia(li); // never skip a message: voice notes / images have no text
     const t = li.querySelector("time");
     const time = norm(t?.getAttribute("title") || t?.textContent || "");
     messages.push({ author: mine ? "" : name, mine, text: text.slice(0, 8000), time: time.slice(0, 60) });
@@ -144,7 +160,8 @@ export function readThread(slug: string): Thread {
   const title = norm((pick<HTMLElement>(THREAD.title)?.innerText) ?? document.querySelector(THREAD.title[0])?.textContent ?? "").slice(0, 200);
   const wk = readWorkana();
   if (wk) {
-    return { slug, title, name: wk.name, messages: wk.messages.slice(-200), can_reply: !!findComposer(), method: "workana" };
+    return { slug, title, name: wk.name, messages: wk.messages.slice(-200), can_reply: !!findComposer(), method: "workana",
+      media: wk.messages.filter((m) => MEDIA_PREFIX.test(m.text)).length };
   }
   const composer = findComposer();
   const found = findList(composer);

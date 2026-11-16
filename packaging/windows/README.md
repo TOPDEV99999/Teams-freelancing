@@ -109,6 +109,17 @@ Each line has its own **Cancel** or **Stop**. **Cancel everything** stops all of
 
 In a job, **Stop** now also stops the account ChatGPT is writing for right now, not only the ones waiting.
 
+### 2.1.1 ⚡ Send urgently (jump the queue)
+Generation and sending normally run one after another. When one project can't wait, open it and click **⚡ Send urgently**.
+1. **Everything else pauses:** other generations and other queued proposals wait.
+2. **This job goes first:**
+   - accounts that already have drafts are queued immediately (auto-send style and price rule, no review window);
+   - accounts without drafts are generated first, with no pause between prompts;
+   - its proposals skip the random gap, the minimum delay between bids and quiet hours.
+3. **When its proposals are sent (or failed), the previous order continues by itself.** An orange banner at the top shows urgent mode; **End urgent mode** stops it at any time, and so does **Cancel everything**.
+
+Still applied: daily limits, and paused or offline accounts are skipped. A prompt ChatGPT is already writing, or a form already being filled, finishes first. Urgent mode ends by itself after 20 minutes at the latest.
+
 ### 2.2 Client trust (colour in the job list)
 The **Client** column shows the client's payment history, e.g. **7/8** = 7 of 8 published projects paid:
 
@@ -141,7 +152,7 @@ To keep the risk low, it only checks open jobs from the last 48 hours plus the j
 ### 2.3 Inbox: read and answer client messages from the dashboard
 The **Inbox** page has two tabs.
 
-**Conversations** shows every account's Workana conversations: one per project, including every bid you sent.
+**Conversations** shows only the projects where a **client has written** to one of your accounts. Conversations that contain only your own proposal are hidden (the count is shown under the list). Not-yet-read conversations are checked quietly in the background (one per account every ~90 seconds) and appear as soon as a client message is confirmed.
 - Click a conversation to see the whole thread: the client's messages on the left, yours on the right.
 - Type in the box at the bottom and click **Send as …** (or press Ctrl + Enter). The reply is typed and sent in **that account's own browser profile**: a background tab opens the conversation on Workana, sends the message, checks that it appeared, and closes.
 - **↻ Refresh** reads the conversation again. **文A** translates it for reading only.

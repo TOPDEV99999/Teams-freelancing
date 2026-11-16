@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(generation.worker()),
         asyncio.create_task(submissions.run()),
         asyncio.create_task(_trim_loop()),
+        asyncio.create_task(_inbox_sweep()),
     ]
     if config.FETCHER != "none":
         from .services.presence import presence
@@ -66,6 +67,11 @@ async def lifespan(app: FastAPI):
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _inbox_sweep() -> None:
+    from .services.inbox import sweep_loop
+    await sweep_loop()
 
 
 app = FastAPI(title="Workana Assistant Hub", lifespan=lifespan)

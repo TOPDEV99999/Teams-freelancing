@@ -314,3 +314,23 @@ def edit_draft(draft_id: int, body: DraftEdit, s: Session = Depends(get_session)
     s.commit()
     s.refresh(d)
     return draft_dict(d)
+
+
+@router.post("/jobs/{job_id}/urgent")
+def make_urgent(job_id: str, s: Session = Depends(get_session)):
+    """Pause everything else, generate/send this job's proposals now, then resume the previous order."""
+    from ..services.urgent import urgent
+
+    try:
+        return urgent.start(s, job_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@router.delete("/urgent")
+def end_urgent():
+    from ..services.urgent import urgent
+
+    was = urgent.job_id
+    urgent.end("ended from the dashboard")
+    return {"ended": was}

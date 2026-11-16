@@ -378,6 +378,7 @@ async function runInboxJob(job: InboxJob) {
   }
   const thread = readThread(job.slug);
   if (!thread.messages.length || (sent && !sent.ok)) snapshot(`conversation: ${sent?.error ?? "no messages recognised"}`);
+  else if (thread.media) snapshot("media message"); // voice note / image: lets the exact markup be matched later
   await send({ kind: "inbox_result", id: job.id, ok: sent ? sent.ok : true, error: sent?.error, verified: sent?.verified, thread });
   banner(sent ? (sent.ok ? "reply sent" : `reply NOT sent: ${sent.error}`) : `read ${thread.messages.length} message(s)`,
     sent && !sent.ok ? "#be123c" : "#047857");
