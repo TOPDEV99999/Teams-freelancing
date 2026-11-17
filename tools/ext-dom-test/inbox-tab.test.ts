@@ -44,7 +44,7 @@ const ok = (name: string, cond: boolean, detail = "") => { if (!cond) fails.push
   tabs = [{ id: 1, pinned: true, url: "https://www.workana.com/inbox/a/me" }, { id: 2, pinned: true, url: "https://www.workana.com/inbox/b/me" }];
   const c = await keepInboxTab(api, { watchInbox: false, taskRunning: false, inboxTabId: 1, jobTabId: null, refreshedAt: 0,
     force: false, now: 0, dueMs: 1, inboxUrl: "https://www.workana.com/inbox" });
-  ok("watcher off: duplicates closed, nothing opened", tabs.length === 1 && !c.created);
+  ok("inbox off: its pinned tab and the duplicates are closed, nothing opened", tabs.length === 0 && !c.created && c.inboxTabId === null);
   tabs = [];
   const d = await keepInboxTab(api, { watchInbox: false, taskRunning: false, inboxTabId: null, jobTabId: null, refreshedAt: 0,
     force: false, now: 0, dueMs: 1, inboxUrl: "https://www.workana.com/inbox" });

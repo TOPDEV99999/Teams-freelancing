@@ -163,6 +163,7 @@ class Conversation(SQLModel, table=True):
     synced_at: Optional[datetime] = Field(default=None, sa_type=DateTime)  # last time the messages were read
     last_error: str = ""
     parsed_v: int = 0  # reader version that produced the stored messages (2 = Workana's verified markup)
+    client_hint: bool = False  # Workana's conversation list shows a new line that isn't yours (not read yet)
 
 
 class Message(SQLModel, table=True):

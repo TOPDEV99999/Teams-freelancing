@@ -52,6 +52,7 @@ _MIGRATIONS = [
     ("submissions", "hold_until", "DATETIME"),
     ("conversations", "parsed_v", "INTEGER NOT NULL DEFAULT 0"),
     ("accounts", "currency", "VARCHAR NOT NULL DEFAULT 'USD'"),
+    ("conversations", "client_hint", "BOOLEAN NOT NULL DEFAULT 0"),
     ("submissions", "currency", "VARCHAR NOT NULL DEFAULT 'USD'"),
 ]
 

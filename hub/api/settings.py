@@ -34,11 +34,14 @@ def get_settings(s: Session = Depends(get_session)):
 
 
 @router.put("/settings")
-def put_settings(updates: dict[str, Any] = Body(...), s: Session = Depends(get_session)):
+async def put_settings(updates: dict[str, Any] = Body(...), s: Session = Depends(get_session)):
     try:
         values = settings_store.set_many(s, updates)
     except (ValueError, TypeError, AttributeError) as e:
         raise HTTPException(422, str(e))
+    if "inbox" in updates:
+        from ..services import inbox
+        await inbox.push_config()  # extensions open / close / refresh their inbox tab right away
     return {"values": values}
 
 
@@ -55,7 +58,7 @@ def get_logs(kind: Optional[str] = None, level: Optional[str] = None, limit: int
 
 
 # Extension version this hub expects (bump together with ext-*/src/config.ts VERSION).
-EXPECTED_EXT_VERSION = "1.3.5"  # Workana extension
+EXPECTED_EXT_VERSION = "1.3.6"  # Workana extension
 EXPECTED_CHATGPT_VERSION = "1.2.0"
 
 

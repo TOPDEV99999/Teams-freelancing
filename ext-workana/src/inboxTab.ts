@@ -37,7 +37,15 @@ export async function keepInboxTab(tabs: TabsApi, st: KeepState): Promise<KeepRe
     await tabs.remove(extras).catch(() => undefined);
     out.closed = extras.length;
   }
-  if (!st.watchInbox) return out;
+  if (!st.watchInbox) {
+    // Inbox switched off: its pinned tab is no longer needed - close it (only ours, never one you pinned).
+    if (keep && keep.id === st.inboxTabId && keep.id !== st.jobTabId) {
+      await tabs.remove([keep.id!]).catch(() => undefined);
+      out.closed += 1;
+      out.inboxTabId = null;
+    }
+    return out;
+  }
   if (!keep) {
     if (st.taskRunning) return out;
     const t = await tabs.create({ url: st.inboxUrl, active: false, pinned: true });

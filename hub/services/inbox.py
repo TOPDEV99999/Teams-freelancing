@@ -46,6 +46,56 @@ def _clean(v: Any, n: int) -> str:
     return re.sub(r"[ \t]+", " ", str(v or "")).strip()[:n]
 
 
+def config(s: Session) -> dict[str, Any]:
+    from . import settings_store
+    return settings_store.get(s, "inbox")
+
+
+def mode(s: Optional[Session] = None) -> str:
+    if s is not None:
+        return config(s)["mode"]
+    with Session(engine) as s2:
+        return config(s2)["mode"]
+
+
+def ext_config(s: Session) -> dict[str, Any]:
+    """What the Workana extensions need: whether to keep the inbox tab, and how often to refresh it."""
+    c = config(s)
+    return {"type": "inbox_config", "mode": c["mode"], "refresh_seconds": int(c["interval_minutes"]) * 60}
+
+
+async def push_config() -> None:
+    """Send the inbox setting to every connected Workana extension (after a change in Settings)."""
+    with Session(engine) as s:
+        msg = ext_config(s)
+    for conn in list(manager.workana.values()):
+        try:
+            await conn.send(msg)
+        except Exception:  # noqa: BLE001 - disconnected meanwhile
+            pass
+
+
+_sent_by_dashboard: dict[tuple[str, str], list[str]] = {}
+
+
+def _is_own_line(s: Session, c: Conversation, snippet: str) -> bool:
+    """The list's latest line is something YOU wrote: the proposal, a reply from the dashboard, or a stored own message."""
+    n = _norm(snippet.rstrip(".… "))[:40]
+    if not n:
+        return True
+    own: list[str] = list(_sent_by_dashboard.get((c.account_id, c.slug), []))
+    sub = s.exec(select(Submission).where(Submission.job_id == c.slug, Submission.account_id == c.account_id)).first()
+    if sub is not None:
+        own.append(sub.final_text)
+    own += [m.text for m in s.exec(select(Message).where(Message.account_id == c.account_id, Message.slug == c.slug,
+                                                         Message.mine == True)).all()]  # noqa: E712
+    for t in own:
+        tn = _norm(t)
+        if tn and (tn.startswith(n) or n.startswith(tn[:40])):
+            return True
+    return False
+
+
 def has_client_message(s: Session, c: Conversation) -> bool:
     return s.exec(select(Message.id).where(Message.account_id == c.account_id, Message.slug == c.slug,
                                            Message.mine == False)).first() is not None  # noqa: E712
@@ -54,7 +104,8 @@ def has_client_message(s: Session, c: Conversation) -> bool:
 def conv_dict(c: Conversation, s: Optional[Session] = None, last: Optional[Message] = None) -> dict[str, Any]:
     job = s.get(Job, c.slug) if s is not None else None
     return {
-        "has_client": has_client_message(s, c) if s is not None else False,
+        "has_client": (c.client_hint or has_client_message(s, c)) if s is not None else False,
+        "client_hint": c.client_hint,
         "id": c.id, "account_id": c.account_id, "slug": c.slug, "name": c.name, "title": c.title or (job.title if job else ""),
         "snippet": c.snippet, "unread": c.unread, "updated_at": iso(c.updated_at), "synced_at": iso(c.synced_at),
         "last_error": c.last_error, "job_id": job.id if job else None,
@@ -102,9 +153,11 @@ def list_conversations(s: Session, account: Optional[str] = None, client_only: b
     if account:
         stmt = stmt.where(Conversation.account_id == account)
     if client_only:
-        stmt = stmt.where(select(Message.id).where(Message.account_id == Conversation.account_id,
-                                                   Message.slug == Conversation.slug,
-                                                   Message.mine == False).exists())  # noqa: E712
+        from sqlalchemy import or_
+        stmt = stmt.where(or_(Conversation.client_hint == True,  # noqa: E712
+                              select(Message.id).where(Message.account_id == Conversation.account_id,
+                                                       Message.slug == Conversation.slug,
+                                                       Message.mine == False).exists()))  # noqa: E712
     rows = s.exec(stmt.order_by(Conversation.updated_at.desc()).limit(500)).all()
     out = []
     for c in rows:
@@ -161,8 +214,12 @@ async def sweep_loop() -> None:
     import random
 
     while True:
-        await asyncio.sleep(SWEEP_SECONDS * random.uniform(0.8, 1.2))
+        with Session(engine) as s:
+            cfg = config(s)
+        await asyncio.sleep(max(60, int(cfg["interval_minutes"]) * 60) * random.uniform(0.8, 1.2))
         try:
+            if mode() != "auto":
+                continue  # only when you check / off: nothing is read in the background
             for account_id in list(manager.workana.keys()):
                 with Session(engine) as s:
                     slug = sweep_candidate(s, account_id)
@@ -192,9 +249,16 @@ def mark_read(s: Session, account_id: str, slug: str) -> None:
 
 # ---------------------------------------------------------------- from the extension
 def on_list(account_id: str, items: list[dict[str, Any]]) -> None:
-    """Workana's inbox list was read: update conversations; changed ones get their messages read."""
+    """Workana's inbox list was read: update conversations; changed ones get their messages read (automatic mode)
+    or announced right away from the list's latest line (only-when-I-check mode). Off: ignored."""
+    from . import notices
+
     changed: list[str] = []
+    list_alerts: list[dict[str, Any]] = []
     with Session(engine) as s:
+        m = mode(s)
+        if m == "off":
+            return
         for it in items[:200]:
             if not isinstance(it, dict):
                 continue
@@ -216,12 +280,22 @@ def on_list(account_id: str, items: list[dict[str, Any]]) -> None:
                     # Read it now - except conversations seen for the first time that have nothing unread.
                     if existed or unread:
                         changed.append(slug)
+                        if m == "manual" and existed and not _is_own_line(s, c, snippet):
+                            # Real-time alert without opening anything: the client's line from Workana's list.
+                            c.client_hint = True
+                            list_alerts.append({"kind": "message", "key": f"list:{slug}:{_norm(snippet)[:80]}"[:300],
+                                                "title": name or c.name or c.title or "New message", "body": snippet,
+                                                "url": f"https://www.workana.com/inbox/{slug}"})
                 c.snippet, c.unread = snippet or c.snippet, unread
                 if name and not c.name:
                     c.name = name
                 s.add(c)
                 s.commit()
                 events.notify("inbox_conversation", conv_dict(c, s))
+    if list_alerts:
+        notices.add(account_id, list_alerts)
+    if m != "auto":
+        return  # only-when-I-check: nothing is opened automatically
     # Read the conversations that changed (one after another, in the background tab of that profile).
     for slug in changed[:5]:
         key = (account_id, slug)
@@ -303,6 +377,7 @@ def store_thread(s: Session, c: Conversation, th: dict[str, Any]) -> list[dict[s
     first_sync = c.synced_at is None
     c.synced_at = utcnow()
     c.parsed_v = 2
+    c.client_hint = False  # read now: the stored messages tell
     if not msgs:
         return []  # nothing recognised: keep what we had (the capture lets the selectors be fixed)
     old = {m.key: m for m in s.exec(select(Message).where(Message.account_id == c.account_id, Message.slug == c.slug)).all()}
@@ -342,6 +417,11 @@ def store_thread(s: Session, c: Conversation, th: dict[str, Any]) -> list[dict[s
 async def request(account_id: str, op: str, slug: str, text: str = "", timeout: float = 120.0) -> dict[str, Any]:
     if not SLUG_RE.match(slug or ""):
         raise InboxError(400, "invalid conversation id")
+    if mode() == "off":
+        raise InboxError(409, "the Inbox is turned off (Settings -> Inbox)")
+    if op == "send":
+        _sent_by_dashboard.setdefault((account_id, slug), []).append(text)
+        _sent_by_dashboard[(account_id, slug)] = _sent_by_dashboard[(account_id, slug)][-10:]
     conn = manager.get_workana(account_id)
     if conn is None:
         raise InboxError(409, f"the Workana extension of '{account_id}' is not connected - start that browser profile")
@@ -361,6 +441,8 @@ async def request(account_id: str, op: str, slug: str, text: str = "", timeout: 
 
 
 async def refresh_list(account_id: str) -> None:
+    if mode() == "off":
+        raise InboxError(409, "the Inbox is turned off (Settings -> Inbox)")
     conn = manager.get_workana(account_id)
     if conn is None:
         raise InboxError(409, f"the Workana extension of '{account_id}' is not connected")

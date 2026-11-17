@@ -67,6 +67,7 @@ const client = new HubClient({
     else if (msg.type === "cancel") void handleCancel(Number(msg.submission_id));
     else if (msg.type === "inbox_read" || msg.type === "inbox_send") void queueInboxJob(msg);
     else if (msg.type === "inbox_refresh") void refreshInbox(true);
+    else if (msg.type === "inbox_config") void applyInboxConfig(msg);
   },
   onTick: () => { void checkDeadline(); void flushNotices(); void checkInboxJob(); void closeDueTabs(); },
 });
@@ -120,6 +121,8 @@ async function isOwnText(snippet: string): Promise<boolean> {
 }
 
 async function onConversations(items: Conv[], own?: string | null) {
+  const { inboxMode = "auto" } = await getLocal("inboxMode");
+  if (inboxMode === "off") return; // Inbox switched off on the dashboard
   if (own && /^[A-Za-z0-9_\-]{2,120}$/.test(own)) await chrome.storage.local.set({ ownSlug: own });
   client.send({ type: "inbox_list", items: items.slice(0, 200) });
   const { seenConvs, watchSeeded } = await getLocal(["seenConvs", "watchSeeded"]);
@@ -143,6 +146,8 @@ async function onConversations(items: Conv[], own?: string | null) {
 
 /** Workana notifications (bell menu): each new one becomes a notice with its real text. */
 async function onBell(items: { key: string; title: string; body: string }[]) {
+  const { inboxMode = "auto" } = await getLocal("inboxMode");
+  if (inboxMode === "off") return;
   const { bellSeen = [], bellSeeded } = await getLocal(["bellSeen", "bellSeeded"]);
   const seen = new Set<string>(bellSeen as string[]);
   const fresh = items.filter((i) => i.key && !seen.has(i.key));
@@ -155,13 +160,23 @@ async function onBell(items: { key: string; title: string; body: string }[]) {
 }
 
 /** Keep one pinned Workana inbox tab in the background and refresh it now and then (popup option). */
+/** Inbox setting from the dashboard (Settings -> Inbox): auto | manual | off + check interval. */
+async function applyInboxConfig(msg: { mode?: string; refresh_seconds?: number }) {
+  const mode = ["auto", "manual", "off"].includes(String(msg.mode)) ? String(msg.mode) : "auto";
+  const refreshMs = Math.max(60, Math.min(3600, Number(msg.refresh_seconds) || 180)) * 1000;
+  await chrome.storage.local.set({ inboxMode: mode, inboxRefreshMs: refreshMs });
+  await refreshInbox(); // opens / closes the pinned inbox tab right away
+}
+
 let inboxTabBusy = false; // one check at a time - two parallel checks must never both open a tab
 async function refreshInbox(force = false) {
   if (inboxTabBusy) return;
   inboxTabBusy = true;
   try {
-    const { watchInbox = true, task, inboxTabId = null, inboxJob, inboxRefreshedAt = 0 } =
-      await getLocal(["watchInbox", "task", "inboxTabId", "inboxJob", "inboxRefreshedAt"]);
+    const { watchInbox: popupWatch = true, task, inboxTabId = null, inboxJob, inboxRefreshedAt = 0, inboxMode = "auto",
+      inboxRefreshMs = WATCH.refreshMs } =
+      await getLocal(["watchInbox", "task", "inboxTabId", "inboxJob", "inboxRefreshedAt", "inboxMode", "inboxRefreshMs"]);
+    const watchInbox = popupWatch && inboxMode !== "off";
     const r = await keepInboxTab({
       query: (q) => chrome.tabs.query(q),
       create: (p) => chrome.tabs.create(p),
@@ -169,7 +184,7 @@ async function refreshInbox(force = false) {
       reload: (id) => chrome.tabs.reload(id),
     }, {
       watchInbox, taskRunning: !!task, inboxTabId, jobTabId: inboxJob?.tabId ?? null, refreshedAt: inboxRefreshedAt,
-      force, now: Date.now(), dueMs: WATCH.refreshMs * (0.75 + Math.random() * 0.5), inboxUrl: WATCH.inboxUrl,
+      force, now: Date.now(), dueMs: Number(inboxRefreshMs) * (0.85 + Math.random() * 0.3), inboxUrl: WATCH.inboxUrl,
     });
     await chrome.storage.local.set({ inboxTabId: r.inboxTabId, inboxRefreshedAt: r.refreshedAt });
     if (r.closed) client.log(`closed ${r.closed} duplicate pinned Workana inbox tab(s)`, "warn");

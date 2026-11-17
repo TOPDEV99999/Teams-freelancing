@@ -92,6 +92,10 @@ async def ext_ws(ws: WebSocket) -> None:
         return await reject(4409, err)
 
     await conn.send({"type": "registered", "role": conn.role, "account": conn.account})
+    if conn.role == "workana":
+        from ..services import inbox
+        with Session(engine) as s:
+            await conn.send(inbox.ext_config(s))  # inbox mode + check interval
     if conn.account:
         _set_account_connected(conn.account, True)
     events.log("ext", f"{conn.role} extension connected" + (f" ({conn.account})" if conn.account else ""),

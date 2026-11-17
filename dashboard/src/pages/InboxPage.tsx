@@ -15,9 +15,19 @@ export default function InboxPage() {
   const accountList = Object.values(accounts).sort((a, b) => a.id.localeCompare(b.id));
   const unreadNotices = notices.filter((n) => !n.read).length;
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [inboxMode, setInboxMode] = useState<"auto" | "manual" | "off">("auto");
+  useEffect(() => { api.settings().then((r) => setInboxMode(r.values.inbox?.mode ?? "auto")).catch(() => undefined); }, []);
 
   return (
     <div className="flex h-full flex-col">
+      {inboxMode !== "auto" && (
+        <div className={`border-b px-4 py-2 text-sm ${inboxMode === "off" ? "border-slate-300 bg-slate-100 text-slate-700" : "border-indigo-200 bg-indigo-50 text-indigo-900"}`}>
+          {inboxMode === "off"
+            ? <>The Inbox is <b>off</b>: nothing is read and there are no message alerts. Turn it on in <a className="font-medium underline" href="#/settings">Settings → Inbox</a>.</>
+            : <>Inbox mode: <b>only when you check</b>. New client messages still alert you; a conversation is read when you open it or click ↻ Refresh.
+              (<a className="underline" href="#/settings">Settings → Inbox</a>)</>}
+        </div>
+      )}
       <div className="flex flex-wrap items-end gap-2 border-b border-slate-200 bg-surface p-3">
         <h1 className="mr-2 text-xl font-semibold">Inbox</h1>
         <div className="mr-4 flex rounded-lg border border-slate-200 p-0.5 text-sm">

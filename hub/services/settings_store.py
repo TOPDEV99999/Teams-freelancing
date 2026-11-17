@@ -37,6 +37,8 @@ def defaults() -> dict[str, Any]:
         "presence": {"enabled": True, "interval_minutes": 20, "max_age_hours": 24},
         # Bid currency per account (Accounts page); prices are decided in USD and converted with these rates.
         "currency_rates": {"BRL": 5.4, "MXN": 18.5, "updated_at": "", "source": "default"},
+        # Dashboard inbox: auto (read in the background) | manual (read only when you check; alerts stay live) | off
+        "inbox": {"mode": "auto", "interval_minutes": 3},
     }
 
 
@@ -223,6 +225,13 @@ def validate(updates: dict[str, Any]) -> dict[str, Any]:
             if not re.fullmatch(r"[a-z]{2,3}(?:-[a-z]{2,4})?", target, re.I):
                 raise ValueError("translation target must be a language code such as en, ko, ja, zh-CN")
             v = {"provider": prov, "target": target}
+        elif k == "inbox":
+            if not isinstance(v, dict):
+                raise ValueError("inbox must be an object")
+            mode = str(v.get("mode") or "auto")
+            if mode not in ("auto", "manual", "off"):
+                raise ValueError("inbox mode must be auto, manual or off")
+            v = {"mode": mode, "interval_minutes": max(1, min(60, int(v.get("interval_minutes") or 3)))}
         elif k == "currency_rates":
             from .currency import validate_rates
             v = validate_rates(v)

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Workana Assistant – Workana submitter",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "description": "Fills (and optionally submits) Workana proposals sent from the local Workana Assistant hub.",
   "minimum_chrome_version": "116",
   "permissions": ["storage", "tabs", "alarms"],

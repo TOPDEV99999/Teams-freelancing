@@ -7,7 +7,7 @@
  * Each list is tried in order; the first selector that matches wins.
  */
 
-export const VERSION = "1.3.5";
+export const VERSION = "1.3.6";
 
 /** Close the job tab ~5 s after a proposal is verified as sent (failed tabs stay open). */
 export const CLOSE_TAB_AFTER_SUCCESS = true;

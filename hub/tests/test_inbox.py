@@ -180,3 +180,53 @@ def test_only_conversations_with_client_messages_are_listed(client, session):
     c_own = session.exec(__import__("sqlmodel").select(Conversation).where(Conversation.slug == "j-own")).one()
     assert svc.looks_like_own_proposal(session, c_own)
     assert svc.sweep_candidate(session, "me") == "j-client"
+
+
+def test_inbox_modes(client, session):
+    from hub.models import Conversation, Job, Submission, SubStatus
+    session.add(Job(id="m-1", url="https://www.workana.com/job/m-1", title="Logo"))
+    session.add(Submission(job_id="m-1", account_id="me", final_text="Hola, puedo diseñar su logo en cinco días.",
+                           price=100, days=5, status=SubStatus.SENT))
+    session.add(Conversation(account_id="me", slug="m-1", snippet="Hola, puedo diseñar su logo en cinco días."))
+    session.commit()
+    with client.websocket_connect("/ws/ext") as wk:
+        assert register(wk, "workana", "me")["type"] == "registered"
+        # Changing the setting is pushed to the extension right away.
+        client.put("/api/settings", json={"inbox": {"mode": "manual", "interval_minutes": 5}})
+        cfg = wk.receive_json()
+        assert cfg == {"type": "inbox_config", "mode": "manual", "refresh_seconds": 300}
+
+        # Only-when-I-check: a client's new line alerts at once and lists the project - nothing is opened.
+        wk.send_json({"type": "inbox_list", "items": [{"slug": "m-1", "name": "Ana", "snippet": "¿Puede empezar hoy?", "unread": True}]})
+        wk.send_json({"type": "ping"})
+        assert wk.receive_json() == {"type": "pong"}  # no inbox_read was sent before the pong
+        n = client.get("/api/notices").json()["items"]
+        assert len(n) == 1 and n[0]["body"] == "¿Puede empezar hoy?" and n[0]["title"] == "Ana"
+        convs = client.get("/api/inbox/conversations?account=me").json()["items"]
+        assert [c["slug"] for c in convs] == ["m-1"] and convs[0]["client_hint"]
+
+        # Off: lists are ignored, nothing can be read or sent, the extension is told to drop its inbox tab.
+        client.put("/api/settings", json={"inbox": {"mode": "off", "interval_minutes": 5}})
+        assert wk.receive_json()["mode"] == "off"
+        wk.send_json({"type": "inbox_list", "items": [{"slug": "m-1", "name": "Ana", "snippet": "¿Hola?", "unread": True}]})
+        wk.send_json({"type": "ping"})
+        assert wk.receive_json() == {"type": "pong"}
+        assert len(client.get("/api/notices").json()["items"]) == 1
+        r = client.post("/api/inbox/me/m-1/refresh")
+        assert r.status_code == 409 and "turned off" in r.text
+    assert client.put("/api/settings", json={"inbox": {"mode": "sometimes"}}).status_code == 422
+
+
+def test_manual_mode_ignores_own_lines(client, session):
+    from hub.models import Conversation, Job, Submission, SubStatus
+    from hub.services import inbox as svc
+    client.put("/api/settings", json={"inbox": {"mode": "manual", "interval_minutes": 3}})
+    session.add(Job(id="m-2", url="https://www.workana.com/job/m-2", title="Web"))
+    session.add(Submission(job_id="m-2", account_id="me", final_text="Propuesta original para su sitio web completo.",
+                           price=100, days=5, status=SubStatus.SENT))
+    session.add(Conversation(account_id="me", slug="m-2", snippet="Propuesta original para su sitio web completo."))
+    session.commit()
+    svc._sent_by_dashboard[("me", "m-2")] = ["Claro, le envío el presupuesto mañana por la tarde."]
+    svc.on_list("me", [{"slug": "m-2", "snippet": "Claro, le envío el presupuesto mañana por la ta...", "unread": False}])
+    assert client.get("/api/notices").json()["items"] == []
+    assert client.get("/api/inbox/conversations?account=me").json()["items"] == []

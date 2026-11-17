@@ -17,7 +17,11 @@ def register(ws, role, account=None, token="test-secret"):
     if account:
         msg["account"] = account
     ws.send_json(msg)
-    return ws.receive_json()
+    r = ws.receive_json()
+    if r.get("type") == "registered" and role == "workana":
+        cfg = ws.receive_json()  # the hub sends the inbox setting right after registration
+        assert cfg["type"] == "inbox_config"
+    return r
 
 
 @pytest.fixture

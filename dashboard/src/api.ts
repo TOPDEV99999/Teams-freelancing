@@ -206,6 +206,7 @@ export interface SettingsValues {
   chatgpt: { temporary_chat: boolean; delete_after_reply: boolean };
   presence: { enabled: boolean; interval_minutes: number; max_age_hours: number };
   currency_rates: { BRL: number; MXN: number; updated_at?: string; source?: string };
+  inbox: { mode: "auto" | "manual" | "off"; interval_minutes: number };
 }
 export interface AutoSend {
   review_seconds: number;

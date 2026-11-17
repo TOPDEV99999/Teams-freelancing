@@ -3,7 +3,7 @@ import { HUB_URL_DEFAULT } from "./config";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const KEYS = ["hubState", "lastResult", "hubUrl", "token", "accountId", "expectedName", "mode", "counter", "task",
-  "counters", "lastConvScan", "watchInbox"];
+  "counters", "lastConvScan", "watchInbox", "inboxMode", "inboxRefreshMs"];
 
 function setIfIdle(id: string, value: string) {
   const el = $<HTMLInputElement>(id);
@@ -38,6 +38,9 @@ async function render() {
       + (s.lastConvScan ? ` · inbox: ${s.lastConvScan.count} conversations read` : "")
     : "Not checked yet - open any Workana page.";
   $<HTMLInputElement>("watchInbox").checked = s.watchInbox ?? true;
+  const modeText: Record<string, string> = { auto: "automatic", manual: "only when you check (alerts stay live)", off: "OFF - no inbox tab, nothing is read" };
+  $("watchInfo").textContent += ` · Inbox (dashboard Settings): ${modeText[s.inboxMode ?? "auto"] ?? s.inboxMode}`
+    + (s.inboxMode !== "off" && s.inboxRefreshMs ? `, checked every ${Math.round(s.inboxRefreshMs / 60000)} min` : "");
   setIfIdle("accountId", s.accountId ?? "");
   setIfIdle("expectedName", s.expectedName ?? "");
   setIfIdle("hubUrl", s.hubUrl ?? HUB_URL_DEFAULT);

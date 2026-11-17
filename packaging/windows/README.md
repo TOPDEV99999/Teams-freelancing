@@ -158,6 +158,18 @@ The **Inbox** page has two tabs.
 - **↻ Refresh** reads the conversation again. **文A** translates it for reading only.
 - New conversations and messages are read by themselves when Workana's inbox shows a change. The full text of a new client message appears in the bell, the toast and the desktop pop-up.
 
+**Inbox mode** (Settings → Inbox):
+- **Automatic**: Workana is checked at the interval you set, and conversations where a client wrote are read in the background (a tab opens and closes).
+- **Only when I check**: nothing opens by itself. A conversation is read when you open it or click ↻. New client messages still alert you in real time and the project appears in the list.
+- **Off**: no inbox tab, nothing is read, no message alerts. The extension closes its pinned inbox tab.
+- **Check interval** (minutes): how often the pinned Workana tab refreshes, and in Automatic mode how often one conversation per account is read.
+
+**Inbox mode** (Settings → Inbox):
+- **Automatic:** Workana is checked at the chosen interval, and conversations where a client wrote are read in the background.
+- **Only when I check:** nothing is opened by itself. A conversation is read when you open it or click ↻. New client messages still alert you in real time, and the project appears in the list.
+- **Off:** no inbox tab, nothing is read, and there are no message alerts. The extension closes its pinned inbox tab.
+- **Check interval:** how often the pinned Workana tab refreshes and, in Automatic mode, how often one conversation per account is read.
+
 **Client messages** lists only messages written by clients: not your own replies, and not Workana's system notifications. Use **Open conversation & reply** to jump to the thread. (A Workana notice that a proposal was not accepted isn't shown, but it sets that bid's result to *rejected* in Stats.)
 
 The profile's browser must be running (its chip at the top is green). Attachments can't be sent from the dashboard; use **Workana ↗** for that.

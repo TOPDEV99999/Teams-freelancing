@@ -20,10 +20,10 @@ export default function SettingsPage() {
   const save = async () => {
     // Only this page's keys, so it never overwrites edits made on the Prompts / Fetcher pages.
     const { generation_provider, assign_threshold, jitter_min_seconds, jitter_max_seconds, quiet_hours,
-      generation_pause_min_seconds, generation_pause_max_seconds, auto_send, translation, notifications, presence, currency_rates } = v;
+      generation_pause_min_seconds, generation_pause_max_seconds, auto_send, translation, notifications, presence, currency_rates, inbox } = v;
     try {
       const r = await api.saveSettings({ generation_provider, assign_threshold, jitter_min_seconds, jitter_max_seconds, quiet_hours,
-        generation_pause_min_seconds, generation_pause_max_seconds, auto_send, translation, notifications, presence, currency_rates });
+        generation_pause_min_seconds, generation_pause_max_seconds, auto_send, translation, notifications, presence, currency_rates, inbox });
       setV(r.values); setDirty(false); toast("Settings saved", "ok");
     }
     catch (e) { toast((e as Error).message); }
@@ -79,6 +79,31 @@ export default function SettingsPage() {
 
         <AutomationCard a={v.auto_send} accounts={Object.values(accounts).map((x) => ({ id: x.id, name: x.display_name || x.id }))}
           onChange={(a) => set("auto_send", a)} />
+
+        <div className="card space-y-3 p-4">
+          <div className="flex items-center gap-2"><Icon name="inbox" className="h-5 w-5 text-indigo-600" /><h2 className="font-semibold">Inbox</h2></div>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+            {([
+              ["auto", "Automatic", "Workana is checked every few minutes and conversations where a client wrote are read in the background (a tab opens and closes)."],
+              ["manual", "Only when I check", "Nothing is opened by itself. A conversation is read when you open it or click ↻. New client messages still alert you in real time (from Workana's conversation list), and the project appears in the Inbox."],
+              ["off", "Off", "No inbox tab, nothing is read, no message alerts. The Workana extensions only send proposals."],
+            ] as const).map(([key, label, help]) => (
+              <label key={key} className={`cursor-pointer rounded-lg border p-3 text-sm ${v.inbox?.mode === key ? "border-indigo-500 bg-indigo-50" : "border-slate-200"}`}>
+                <input type="radio" name="inbox-mode" className="mr-2" checked={v.inbox?.mode === key}
+                  onChange={() => set("inbox", { ...(v.inbox ?? { interval_minutes: 3 }), mode: key })} />
+                <b>{label}</b>
+                <p className="mt-1 text-xs text-slate-500">{help}</p>
+              </label>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-56"><span className="label">Check interval (minutes)</span>
+              <input className="input" type="number" min={1} max={60} disabled={v.inbox?.mode === "off"} value={v.inbox?.interval_minutes ?? 3}
+                onChange={(e) => set("inbox", { ...(v.inbox ?? { mode: "auto" }), interval_minutes: Number(e.target.value) })} /></div>
+            <p className="pb-2 text-xs text-slate-500">How often the Workana inbox tab refreshes (new-message alerts) and, in Automatic mode,
+              how often one conversation per account is read. Longer = fewer requests to Workana.</p>
+          </div>
+        </div>
 
         <div className="card space-y-3 p-4">
           <div className="flex items-center gap-2"><span className="text-lg">💱</span><h2 className="font-semibold">Currencies</h2></div>
